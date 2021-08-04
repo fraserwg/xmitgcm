@@ -983,6 +983,98 @@ def read_3D_chunks(variable, file_metadata, use_mmap=False, use_dask=False):
     return data
 
 
+def read_tiled_3D_chunks(variable, tile_metadata, use_mmap=False, use_dask=False):
+    """
+    Return dask array for variable, from the file described by file_metadata,
+    reading 3D chunks. Not suitable for llc data.
+
+    Parameters
+    ----------
+    variable : string
+               name of the variable to read
+    file_metadata : dict
+               internal file_metadata for binary file
+    use_mmap : bool, optional
+               Whether to read the data using a numpy.memmap
+    use_dask : bool, optional
+               collect the data lazily or eagerly
+
+    Returns
+    -------
+    dask array for variable, with 3d (nz, ny, nx) chunks
+    or numpy.ndarray or memmap, depending on input args
+
+    """
+
+    def load_chunk(rec):
+        return _read_xyz_chunk(variable, tile_metadata,
+                               rec=rec,
+                               use_mmap=use_mmap)[None]
+
+    chunks = (1, tile_metadata['nz'], tile_metadata['len_tiley'], tile_metadata['len_tilex'])
+    shape = (tile_metadata['nt'], tile_metadata['nz'],
+             tile_metadata['ny'], tile_metadata['nx'])
+    name = 'mds-' + tokenize(tile_metadata, variable)
+
+    dsk = {(name, rec, 0, 0, 0): (load_chunk, rec)
+           for rec in range(tile_metadata['nt'])}
+
+    data = dsa.Array(dsk, name, chunks,
+                     dtype=tile_metadata['dtype'], shape=shape)
+
+    if not use_dask:
+        data = data.compute()
+
+    return data
+
+
+def _read_tiled_xyz_chunk(variable, tile_metadata, rec=0, use_mmap=False):
+    """
+    Read a 3d chunk (x,y,z) of variable from file described in
+    file_metadata.
+
+    Parameters
+    ----------
+    variable : string
+               name of the variable to read
+    file_metadata : dict
+               file_metadata for binary file
+    rec      : integer, optional
+               time record to read (default=0)
+    use_mmap : bool, optional
+               Whether to read the data using a numpy.memmap
+
+    Returns
+    -------
+    numpy array or memmap
+    """
+    # What does tile_metadata contain?
+    # It's the same as file_metadata, but it also has
+    # len_tilex and len_tiley variables
+    # filename is replaced by tilename_prefix (e.g. './data_dir/V.0000000001') 
+    
+    # First we will loop over tiles. For each tile we will reconstruct the
+    # file_metadata from the tile_metadata argument. This involves replacing
+    # filename.
+    bj_max = int(tile_metadata['ny'] / tile_metadata['len_tiley'])
+    bi_max = int(tile_metadata['nx'] / tile_metadata['len_tilex'])
+
+    block_data_list = []
+    for bj in range(1, bj_max + 1):
+        block_data_sublist = []
+        for bi in range(1, bi_max + 1):
+            bistr, bjstr = '{:03d}'.format(bi), '{:03d}'.format(bj)
+            full_file_path = tile_metadata['tilename_prefix'] + '.' + bistr + '.' + bjstr + '.data'
+            file_metadata = tile_metadata
+            file_metadata.update({'filename': full_file_path})
+            data = _read_xyz_chunk(variable, file_metadata, rec=rec, use_mmap=use_mmap)
+            block_data_sublist += [data]
+        block_data_list += [block_data_sublist]
+    
+    blocked_data = dsa.block(block_data_list)
+    return blocked_data
+
+
 def _read_xyz_chunk(variable, file_metadata, rec=0, use_mmap=False):
     """
     Read a 3d chunk (x,y,z) of variable from file described in
