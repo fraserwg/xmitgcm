@@ -1007,7 +1007,15 @@ def read_tiled_3D_chunks(variable, tile_metadata, use_mmap=False, use_dask=False
     """
 
     def load_chunk(rec):
-        return _read_xyz_chunk(variable, tile_metadata,
+        print('.{:010d}'.format(rec + 1))
+        new_tile_metadata = tile_metadata.copy()
+        new_tile_metadata['tilename_prefix'] = tile_metadata['tilename_prefix'] + '.{:010d}'.format(rec + 1)
+        new_tile_metadata['vars'] = [var + '.{:010d}'.format(rec + 1) for var in tile_metadata['vars']] 
+        new_variable = variable + '.{:010d}'.format(rec + 1)
+        print(new_tile_metadata['tilename_prefix'])
+        print(new_tile_metadata['vars'])
+
+        return _read_tiled_xyz_chunk(new_variable, new_tile_metadata,
                                rec=rec,
                                use_mmap=use_mmap)[None]
 
@@ -1065,8 +1073,11 @@ def _read_tiled_xyz_chunk(variable, tile_metadata, rec=0, use_mmap=False):
         for bi in range(1, bi_max + 1):
             bistr, bjstr = '{:03d}'.format(bi), '{:03d}'.format(bj)
             full_file_path = tile_metadata['tilename_prefix'] + '.' + bistr + '.' + bjstr + '.data'
-            file_metadata = tile_metadata
-            file_metadata.update({'filename': full_file_path})
+            file_metadata = tile_metadata.copy()
+            file_metadata.update({'filename': full_file_path,
+                                  'nx': tile_metadata['len_tilex'],
+                                  'ny': tile_metadata['len_tiley']})
+
             data = _read_xyz_chunk(variable, file_metadata, rec=rec, use_mmap=use_mmap)
             block_data_sublist += [data]
         block_data_list += [block_data_sublist]
